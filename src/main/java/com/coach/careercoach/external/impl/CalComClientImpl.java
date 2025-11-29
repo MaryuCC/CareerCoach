@@ -17,8 +17,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 
 /**
- * Cal.com API 真实实现
- * 使用Cal.com API v2
+ * Cal.com 功能实现
  */
 @Component
 @Primary

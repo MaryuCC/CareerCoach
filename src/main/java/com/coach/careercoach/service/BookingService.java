@@ -1,15 +1,25 @@
 package com.coach.careercoach.service;
 
+import com.coach.careercoach.dto.booking.AvailableSlotsResponse;
 import com.coach.careercoach.dto.booking.BookingDetailVO;
 import com.coach.careercoach.dto.webhook.CalWebhookPayload;
 import com.coach.careercoach.model.entity.Booking;
 
+import java.time.LocalDate;
 import java.util.List;
 
 public interface BookingService {
 
     /**
-     * 获取预约链接
+     * 获取可用时间槽（预约前的第一步）
+     * @param startDate 开始日期
+     * @param endDate 结束日期
+     * @return 可用时间槽
+     */
+    AvailableSlotsResponse getAvailableSlots(LocalDate startDate, LocalDate endDate);
+
+    /**
+     * 获取预约链接（预约的最后一步）
      * @param userId 用户ID
      * @return 预约链接URL
      */

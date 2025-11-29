@@ -25,4 +25,4 @@ cal:
 # JWT配置
 jwt:
   secret: "PXrQbuCwXwOZzkML/Vm2S5rSwt1iybvmKtGDzVEu+Hc="
-  expiration: 3600000 # 1小时（毫秒）
+  expiration: 3600000 # 1小时

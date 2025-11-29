@@ -1,7 +1,10 @@
 package com.coach.careercoach.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.coach.careercoach.dto.booking.AvailableSlotsResponse;
 import com.coach.careercoach.dto.booking.BookingDetailVO;
+import com.coach.careercoach.dto.calcom.EventTypeResponse;
+import com.coach.careercoach.dto.calcom.SlotResponse;
 import com.coach.careercoach.dto.webhook.CalWebhookPayload;
 import com.coach.careercoach.enums.BookingStatus;
 import com.coach.careercoach.external.CalComClient;
@@ -14,9 +17,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -32,6 +36,54 @@ public class BookingServiceImpl implements BookingService {
     private CalComClient calComClient;
 
     @Override
+    public AvailableSlotsResponse getAvailableSlots(LocalDate startDate, LocalDate endDate) {
+        // 1. 获取Round Robin Event Type
+        EventTypeResponse eventTypes = calComClient.getEventTypes();
+        
+        if (eventTypes == null || eventTypes.getData() == null || eventTypes.getData().isEmpty()) {
+            throw new RuntimeException("未找到可用的Event Type");
+        }
+
+        // 查找Round Robin类型的Event Type
+        EventTypeResponse.EventType roundRobinEventType = eventTypes.getData().stream()
+                .filter(et -> "ROUND_ROBIN".equalsIgnoreCase(et.getSchedulingType()))
+                .findFirst()
+                .orElse(eventTypes.getData().get(0)); // 如果没有Round Robin，使用第一个
+
+        // 2. 获取该Event Type的可用时间槽
+        SlotResponse slotResponse = calComClient.getAvailableSlots(
+                roundRobinEventType.getId(), 
+                startDate, 
+                endDate
+        );
+
+        // 3. 格式化返回数据
+        Map<String, List<String>> slots = new HashMap<>();
+        int totalSlots = 0;
+
+        if (slotResponse != null && slotResponse.getData() != null 
+                && slotResponse.getData().getSlots() != null) {
+            Map<String, List<String>> rawSlots = slotResponse.getData().getSlots();
+            
+            for (Map.Entry<String, List<String>> entry : rawSlots.entrySet()) {
+                String date = entry.getKey();
+                List<String> times = entry.getValue().stream()
+                        .map(this::formatTimeSlot)
+                        .collect(Collectors.toList());
+                slots.put(date, times);
+                totalSlots += times.size();
+            }
+        }
+
+        return AvailableSlotsResponse.builder()
+                .eventTypeId(roundRobinEventType.getId())
+                .eventTypeName(roundRobinEventType.getTitle())
+                .availableSlots(slots)
+                .totalSlots(totalSlots)
+                .build();
+    }
+
+    @Override
     public String getBookingUrl(Long userId) {
         // 验证用户是否存在
         User user = userMapper.selectById(userId);
@@ -41,6 +93,18 @@ public class BookingServiceImpl implements BookingService {
 
         // 调用Cal.com客户端获取预约链接
         return calComClient.getBookingUrl(userId);
+    }
+
+    /**
+     * 格式化时间槽（从ISO 8601格式提取时间部分）
+     */
+    private String formatTimeSlot(String isoDateTime) {
+        try {
+            LocalDateTime dateTime = LocalDateTime.parse(isoDateTime, DateTimeFormatter.ISO_DATE_TIME);
+            return dateTime.format(DateTimeFormatter.ofPattern("HH:mm"));
+        } catch (Exception e) {
+            return isoDateTime; // 如果解析失败，返回原始值
+        }
     }
 
     @Override

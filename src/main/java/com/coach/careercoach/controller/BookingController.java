@@ -1,14 +1,12 @@
 package com.coach.careercoach.controller;
 
 import com.coach.careercoach.api.ApiResponse;
-import com.coach.careercoach.dto.booking.BookingDetailVO;
-import com.coach.careercoach.dto.booking.BookingUrlResponse;
-import com.coach.careercoach.dto.booking.CancelBookingRequestDTO;
-import com.coach.careercoach.dto.booking.CancelUrlResponse;
+import com.coach.careercoach.dto.booking.*;
 import com.coach.careercoach.dto.webhook.CalWebhookPayload;
 import com.coach.careercoach.service.BookingService;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -25,7 +23,24 @@ public class BookingController {
     }
 
     /**
-     * 获取预约链接
+     * 1: 获取可用时间槽
+     * GET /api/available-slots?startDate=2024-12-01&endDate=2024-12-31
+     */
+    @GetMapping("/available-slots")
+    public ApiResponse<AvailableSlotsResponse> getAvailableSlots(
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+        
+        // 默认查询未来30天
+        LocalDate start = startDate != null ? LocalDate.parse(startDate) : LocalDate.now();
+        LocalDate end = endDate != null ? LocalDate.parse(endDate) : LocalDate.now().plusDays(30);
+        
+        AvailableSlotsResponse response = bookingService.getAvailableSlots(start, end);
+        return ApiResponse.ok(response);
+    }
+
+    /**
+     * 2: 获取预约链接（用户选择时间槽后）
      * POST /api/booking-url?userId={userId}
      */
     @PostMapping("/booking-url")
