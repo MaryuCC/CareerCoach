@@ -8,20 +8,14 @@ import java.util.Map;
 
 /**
  * Cal.com API 可用时间槽响应
+ * 响应格式: { "status": "success", "data": { "2025-12-01": [{"start": "..."}], ... } }
  */
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SlotResponse {
     
     private String status;
-    private SlotData data;
 
-    @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class SlotData {
-        // slots是一个Map，key是日期字符串，value是时间槽数组
-        // 例如: {"2024-12-01": ["2024-12-01T10:00:00Z", "2024-12-01T11:00:00Z"]}
-        private Map<String, List<String>> slots;
-    }
+    private Map<String, List<Map<String, String>>> data;
 }
 

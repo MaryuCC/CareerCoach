@@ -29,6 +29,8 @@ public class User {
 
     private String passwordHash;
 
+    private String apikeyHash;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

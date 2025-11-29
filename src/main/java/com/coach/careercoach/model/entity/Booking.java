@@ -27,8 +27,6 @@ public class Booking {
 
     private Long studentId;
 
-    private String calCoachId;
-
     private String coachName;
 
     private String coachEmail;
@@ -36,8 +34,6 @@ public class Booking {
     private String userName;
 
     private String userEmail;
-
-    private String externalSlotId;
 
     private String externalBookingId;
 

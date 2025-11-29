@@ -3,6 +3,9 @@ package com.coach.careercoach.external.impl;
 import com.coach.careercoach.dto.calcom.*;
 import com.coach.careercoach.exception.CalComApiException;
 import com.coach.careercoach.external.CalComClient;
+import com.coach.careercoach.model.entity.User;
+import com.coach.careercoach.service.UserService;
+import com.coach.careercoach.util.EncryptionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,7 +17,6 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.Collections;
 
 /**
  * Cal.com 功能实现
@@ -26,12 +28,11 @@ public class CalComClientImpl implements CalComClient {
     private static final Logger log = LoggerFactory.getLogger(CalComClientImpl.class);
 
     private final RestTemplate restTemplate;
+    private final UserService userService;
+    private final EncryptionUtil encryptionUtil;
 
     @Value("${cal.api-url}")
     private String apiUrl;
-
-    @Value("${cal.api-key}")
-    private String apiKey;
 
     @Value("${cal.base-url}")
     private String baseUrl;
@@ -41,50 +42,28 @@ public class CalComClientImpl implements CalComClient {
 
     @Value("${cal.event-type-slug}")
     private String eventTypeSlug;
+    
+    @Value("${cal.event-type-id}")
+    private String eventTypeId;
 
-    @Value("${cal.round-robin-event-type-id:}")
-    private String roundRobinEventTypeId;
+    @Value("${cal.time-zone:Asia/Shanghai}")
+    private String timeZone;
 
-    public CalComClientImpl(RestTemplate restTemplate) {
+    public CalComClientImpl(RestTemplate restTemplate, UserService userService, EncryptionUtil encryptionUtil) {
         this.restTemplate = restTemplate;
+        this.userService = userService;
+        this.encryptionUtil = encryptionUtil;
     }
+
+
 
     @Override
     public String getBookingUrl(Long userId) {
-        try {
-            // 如果配置了Round Robin Event Type ID，直接使用
-            if (roundRobinEventTypeId != null && !roundRobinEventTypeId.isEmpty()) {
-                return buildBookingUrl(roundRobinEventTypeId, userId);
-            }
-
-            // 否则查询Event Types，找到Round Robin类型
-            EventTypeResponse response = getEventTypes();
-            if (response != null && response.getData() != null) {
-                // 查找Round Robin类型的Event Type
-                for (EventTypeResponse.EventType eventType : response.getData()) {
-                    if ("ROUND_ROBIN".equalsIgnoreCase(eventType.getSchedulingType())) {
-                        log.info("Found Round Robin event type: {}", eventType.getId());
-                        return buildBookingUrl(String.valueOf(eventType.getId()), userId);
-                    }
-                }
-                
-                // 如果没有Round Robin类型，使用第一个Event Type
-                if (!response.getData().isEmpty()) {
-                    EventTypeResponse.EventType firstEventType = response.getData().get(0);
-                    log.warn("No Round Robin event type found, using first event type: {}", firstEventType.getId());
-                    return buildBookingUrl(String.valueOf(firstEventType.getId()), userId);
-                }
-            }
-
-            // 如果API调用失败，返回默认的预约链接
-            log.warn("Failed to get event types, returning default booking URL");
-            return String.format("%s/%s/%s?userId=%d", baseUrl, username, eventTypeSlug, userId);
-
-        } catch (Exception e) {
-            log.error("Error getting booking URL", e);
-            // 返回默认的预约链接
-            return String.format("%s/%s/%s?userId=%d", baseUrl, username, eventTypeSlug, userId);
-        }
+        // 构建 Cal.com 预约页面链接
+        // 格式: https://cal.com/{username}/{event-type-slug}
+        String bookingUrl = String.format("%s/%s/%s", baseUrl, username, eventTypeSlug);
+        log.info("Generated booking URL for userId {}: {}", userId, bookingUrl);
+        return bookingUrl;
     }
 
     @Override
@@ -97,47 +76,39 @@ public class CalComClientImpl implements CalComClient {
         return String.format("%s/booking/%s?cancel=true", baseUrl, externalBookingId);
     }
 
-    /**
-     * 获取所有Event Types
-     */
-    public EventTypeResponse getEventTypes() {
-        try {
-            String url = apiUrl + "/event-types";
-            HttpHeaders headers = createHeaders();
-            HttpEntity<String> entity = new HttpEntity<>(headers);
-
-            ResponseEntity<EventTypeResponse> response = restTemplate.exchange(
-                    url,
-                    HttpMethod.GET,
-                    entity,
-                    EventTypeResponse.class
-            );
-
-            log.info("Got event types from Cal.com: {}", response.getBody());
-            return response.getBody();
-
-        } catch (HttpClientErrorException e) {
-            log.error("Cal.com API error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
-            throw new CalComApiException("Failed to get event types: " + e.getMessage(), e);
-        } catch (Exception e) {
-            log.error("Error calling Cal.com API", e);
-            throw new CalComApiException("Failed to get event types: " + e.getMessage(), e);
-        }
-    }
 
     /**
      * 获取可用时间槽
      */
-    public SlotResponse getAvailableSlots(Long eventTypeId, LocalDate startDate, LocalDate endDate) {
+    @Override
+    public SlotResponse getAvailableSlots(Long userId, Long eventTypeId, LocalDate startDate, LocalDate endDate) {
         try {
-            String url = String.format("%s/slots/available?eventTypeId=%d&startTime=%s&endTime=%s",
-                    apiUrl,
+            // 0. 从数据库获取API Key
+            String apiKey = getApiKey(userId);
+            
+            // 1. 转换为ISO 8601格式（带时区）
+            String start = startDate.atStartOfDay()
+                    .atZone(java.time.ZoneId.of("UTC"))
+                    .format(DateTimeFormatter.ISO_INSTANT);  // 2025-12-01T00:00:00Z
+            
+            String end = endDate.atTime(23, 59, 59)
+                    .atZone(java.time.ZoneId.of("UTC"))
+                    .format(DateTimeFormatter.ISO_INSTANT);  // 2025-12-08T23:59:59Z
+            
+            // 2. 构造URL - 正确的端点和参数
+            String url = String.format("%s/slots?eventTypeId=%d&start=%s&end=%s&timeZone=%s",
+                    apiUrl,           // https://api.cal.com/v2
                     eventTypeId,
-                    startDate.format(DateTimeFormatter.ISO_LOCAL_DATE),
-                    endDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    start,            // 2025-12-01T00:00:00Z
+                    end,              // 2025-12-08T23:59:59Z
+                    timeZone          // Asia/Shanghai or Australia/Sydney
             );
 
-            HttpHeaders headers = createHeaders();
+            // 3. 设置Headers - 添加API version
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Bearer " + apiKey);
+            headers.set("cal-api-version", "2024-09-04");
+            
             HttpEntity<String> entity = new HttpEntity<>(headers);
 
             ResponseEntity<SlotResponse> response = restTemplate.exchange(
@@ -147,7 +118,7 @@ public class CalComClientImpl implements CalComClient {
                     SlotResponse.class
             );
 
-            log.info("Got available slots from Cal.com");
+            log.info("Got available slots from Cal.com for userId: {}, eventTypeId: {}", userId, eventTypeId);
             return response.getBody();
 
         } catch (HttpClientErrorException e) {
@@ -160,126 +131,66 @@ public class CalComClientImpl implements CalComClient {
     }
 
     /**
-     * 创建预约
+     * 获取用户的预约列表
      */
-    public BookingApiResponse createBooking(Long eventTypeId, String startTime,
-                                            String attendeeName, String attendeeEmail) {
+    @Override
+    public CalBookingResponse getUserBookings(Long userId, String attendeeEmail) {
         try {
-            String url = apiUrl + "/bookings";
-
-            BookingCreateRequest.Attendee attendee = BookingCreateRequest.Attendee.builder()
-                    .name(attendeeName)
-                    .email(attendeeEmail)
-                    .timeZone("Asia/Shanghai")
-                    .language("zh")
-                    .build();
-
-            BookingCreateRequest request = BookingCreateRequest.builder()
-                    .eventTypeId(eventTypeId)
-                    .start(startTime)
-                    .attendee(Collections.singletonList(attendee))
-                    .timeZone("Asia/Shanghai")
-                    .language("zh")
-                    .build();
-
-            HttpHeaders headers = createHeaders();
-            HttpEntity<BookingCreateRequest> entity = new HttpEntity<>(request, headers);
-
-            ResponseEntity<BookingApiResponse> response = restTemplate.exchange(
-                    url,
-                    HttpMethod.POST,
-                    entity,
-                    BookingApiResponse.class
+            // 0. 从数据库获取API Key
+            String apiKey = getApiKey(userId);
+            
+            // 1. 构造URL - 使用attendeeEmail参数过滤
+            String url = String.format("%s/bookings?attendeeEmail=%s&sortCreated=desc",
+                    apiUrl,           // https://api.cal.com/v2
+                    attendeeEmail
             );
 
-            log.info("Created booking on Cal.com: {}", response.getBody());
-            return response.getBody();
-
-        } catch (HttpClientErrorException e) {
-            log.error("Cal.com API error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
-            throw new CalComApiException("Failed to create booking: " + e.getMessage(), e);
-        } catch (Exception e) {
-            log.error("Error calling Cal.com API", e);
-            throw new CalComApiException("Failed to create booking: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * 取消预约
-     */
-    public BookingApiResponse cancelBooking(String bookingUid, String reason) {
-        try {
-            String url = apiUrl + "/bookings/" + bookingUid + "/cancel";
-
-            CancelBookingRequest request = CancelBookingRequest.builder()
-                    .cancellationReason(reason)
-                    .build();
-
-            HttpHeaders headers = createHeaders();
-            HttpEntity<CancelBookingRequest> entity = new HttpEntity<>(request, headers);
-
-            ResponseEntity<BookingApiResponse> response = restTemplate.exchange(
-                    url,
-                    HttpMethod.POST,
-                    entity,
-                    BookingApiResponse.class
-            );
-
-            log.info("Cancelled booking on Cal.com: {}", bookingUid);
-            return response.getBody();
-
-        } catch (HttpClientErrorException e) {
-            log.error("Cal.com API error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
-            throw new CalComApiException("Failed to cancel booking: " + e.getMessage(), e);
-        } catch (Exception e) {
-            log.error("Error calling Cal.com API", e);
-            throw new CalComApiException("Failed to cancel booking: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * 查询预约详情
-     */
-    public BookingApiResponse getBooking(String bookingUid) {
-        try {
-            String url = apiUrl + "/bookings/" + bookingUid;
-            HttpHeaders headers = createHeaders();
+            // 2. 设置Headers
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Bearer " + apiKey);
+            headers.set("cal-api-version", "2024-08-13");  // 使用文档中指定的版本
+            
             HttpEntity<String> entity = new HttpEntity<>(headers);
 
-            ResponseEntity<BookingApiResponse> response = restTemplate.exchange(
+            // 3. 调用API
+            ResponseEntity<CalBookingResponse> response = restTemplate.exchange(
                     url,
                     HttpMethod.GET,
                     entity,
-                    BookingApiResponse.class
+                    CalBookingResponse.class
             );
 
-            log.info("Got booking from Cal.com: {}", bookingUid);
+            log.info("Got bookings from Cal.com for userId: {}, email: {}", userId, attendeeEmail);
             return response.getBody();
 
         } catch (HttpClientErrorException e) {
             log.error("Cal.com API error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
-            throw new CalComApiException("Failed to get booking: " + e.getMessage(), e);
+            throw new CalComApiException("Failed to get user bookings: " + e.getMessage(), e);
         } catch (Exception e) {
             log.error("Error calling Cal.com API", e);
-            throw new CalComApiException("Failed to get booking: " + e.getMessage(), e);
+            throw new CalComApiException("Failed to get user bookings: " + e.getMessage(), e);
         }
     }
 
     /**
-     * 构建预约链接
+     * 从数据库获取用户的API Key并解密
      */
-    private String buildBookingUrl(String eventTypeId, Long userId) {
-        return String.format("%s/%s/%s?userId=%d", baseUrl, username, eventTypeSlug, userId);
+    private String getApiKey(Long userId) {
+        User user = userService.getById(userId);
+        if (user == null) {
+            throw new CalComApiException("用户不存在: " + userId);
+        }
+        if (user.getApikeyHash() == null || user.getApikeyHash().isEmpty()) {
+            throw new CalComApiException("用户未配置API Key: " + userId);
+        }
+
+        // 解密 API Key
+        try {
+            return encryptionUtil.decrypt(user.getApikeyHash());
+        } catch (Exception e) {
+            throw new CalComApiException("API Key 解密失败: " + e.getMessage(), e);
+        }
     }
 
-    /**
-     * 创建HTTP Headers
-     */
-    private HttpHeaders createHeaders() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("Authorization", "Bearer " + apiKey);
-        return headers;
-    }
 }
 

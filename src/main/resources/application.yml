@@ -15,14 +15,18 @@ spring:
 # Cal.com 集成配置
 cal:
   api-url: https://api.cal.com/v2
-  api-key: cal_live_efd3ea05ebcf15a46e8d1738b62268c9
   base-url: https://cal.com
-  username: ${CAL_USERNAME:demo-coach}
-  event-type-slug: career-coach-session
-  round-robin-event-type-id: ${CAL_EVENT_TYPE_ID:}
-  webhook-secret: ${CAL_WEBHOOK_SECRET:your-webhook-secret}
+  username: kris-l-unimxu
+  event-type-id: 4024625
+  event-type-slug: 30min
+  time-zone: Australia/Sydney
+  # teamslug: #Team模式下的slot显示有bug没法用
 
 # JWT配置
 jwt:
   secret: "PXrQbuCwXwOZzkML/Vm2S5rSwt1iybvmKtGDzVEu+Hc="
   expiration: 3600000 # 1小时
+
+# 加密配置
+encryption:
+  secret-key: "CareerCoach2024Secret1234567890"  

@@ -3,7 +3,7 @@ package com.coach.careercoach.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.coach.careercoach.dto.booking.AvailableSlotsResponse;
 import com.coach.careercoach.dto.booking.BookingDetailVO;
-import com.coach.careercoach.dto.calcom.EventTypeResponse;
+import com.coach.careercoach.dto.calcom.CalBookingResponse;
 import com.coach.careercoach.dto.calcom.SlotResponse;
 import com.coach.careercoach.dto.webhook.CalWebhookPayload;
 import com.coach.careercoach.enums.BookingStatus;
@@ -13,7 +13,10 @@ import com.coach.careercoach.mapper.UserMapper;
 import com.coach.careercoach.model.entity.Booking;
 import com.coach.careercoach.model.entity.User;
 import com.coach.careercoach.service.BookingService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +29,8 @@ import java.util.stream.Collectors;
 @Service
 public class BookingServiceImpl implements BookingService {
 
+    private static final Logger log = LoggerFactory.getLogger(BookingServiceImpl.class);
+
     @Autowired
     private BookingMapper bookingMapper;
 
@@ -35,40 +40,29 @@ public class BookingServiceImpl implements BookingService {
     @Autowired
     private CalComClient calComClient;
 
+    @Value("${cal.event-type-id}")
+    private Long eventTypeId;
+
     @Override
-    public AvailableSlotsResponse getAvailableSlots(LocalDate startDate, LocalDate endDate) {
-        // 1. 获取Round Robin Event Type
-        EventTypeResponse eventTypes = calComClient.getEventTypes();
-        
-        if (eventTypes == null || eventTypes.getData() == null || eventTypes.getData().isEmpty()) {
-            throw new RuntimeException("未找到可用的Event Type");
-        }
-
-        // 查找Round Robin类型的Event Type
-        EventTypeResponse.EventType roundRobinEventType = eventTypes.getData().stream()
-                .filter(et -> "ROUND_ROBIN".equalsIgnoreCase(et.getSchedulingType()))
-                .findFirst()
-                .orElse(eventTypes.getData().get(0)); // 如果没有Round Robin，使用第一个
-
-        // 2. 获取该Event Type的可用时间槽
+    public AvailableSlotsResponse getAvailableSlots(Long userId, LocalDate startDate, LocalDate endDate) {
+        // 1. 直接使用配置的eventTypeId调用API，使用用户的API Key
         SlotResponse slotResponse = calComClient.getAvailableSlots(
-                roundRobinEventType.getId(), 
+                userId,       // 用户ID，用于获取API Key
+                eventTypeId,  // 从配置读取
                 startDate, 
                 endDate
         );
-
-        // 3. 格式化返回数据
+        
+        // 2. 格式化返回数据
         Map<String, List<String>> slots = new HashMap<>();
         int totalSlots = 0;
 
-        if (slotResponse != null && slotResponse.getData() != null 
-                && slotResponse.getData().getSlots() != null) {
-            Map<String, List<String>> rawSlots = slotResponse.getData().getSlots();
-            
-            for (Map.Entry<String, List<String>> entry : rawSlots.entrySet()) {
+        if (slotResponse != null && slotResponse.getData() != null) {
+            // 遍历data，提取每个时间槽的start时间
+            for (Map.Entry<String, List<Map<String, String>>> entry : slotResponse.getData().entrySet()) {
                 String date = entry.getKey();
                 List<String> times = entry.getValue().stream()
-                        .map(this::formatTimeSlot)
+                        .map(slot -> formatTimeSlot(slot.get("start")))
                         .collect(Collectors.toList());
                 slots.put(date, times);
                 totalSlots += times.size();
@@ -76,8 +70,8 @@ public class BookingServiceImpl implements BookingService {
         }
 
         return AvailableSlotsResponse.builder()
-                .eventTypeId(roundRobinEventType.getId())
-                .eventTypeName(roundRobinEventType.getTitle())
+                .eventTypeId(eventTypeId)
+                .eventTypeName("Career Coach Session")
                 .availableSlots(slots)
                 .totalSlots(totalSlots)
                 .build();
@@ -95,29 +89,31 @@ public class BookingServiceImpl implements BookingService {
         return calComClient.getBookingUrl(userId);
     }
 
-    /**
-     * 格式化时间槽（从ISO 8601格式提取时间部分）
-     */
-    private String formatTimeSlot(String isoDateTime) {
-        try {
-            LocalDateTime dateTime = LocalDateTime.parse(isoDateTime, DateTimeFormatter.ISO_DATE_TIME);
-            return dateTime.format(DateTimeFormatter.ofPattern("HH:mm"));
-        } catch (Exception e) {
-            return isoDateTime; // 如果解析失败，返回原始值
-        }
-    }
+
 
     @Override
     public List<BookingDetailVO> listUserBookings(Long userId) {
-        // 查询该用户的所有预约
-        LambdaQueryWrapper<Booking> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Booking::getStudentId, userId)
-               .orderByDesc(Booking::getCreatedAt);
+        // 1. 根据userId获取用户邮箱
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new RuntimeException("用户不存在: " + userId);
+        }
 
-        List<Booking> bookings = bookingMapper.selectList(wrapper);
+        if (user.getEmail() == null || user.getEmail().isEmpty()) {
+            throw new RuntimeException("用户邮箱不存在");
+        }
 
-        // 转换为VO
-        return bookings.stream().map(this::convertToVO).collect(Collectors.toList());
+        // 2. 调用Cal.com API获取该用户的预约列表
+        CalBookingResponse calResponse = calComClient.getUserBookings(userId, user.getEmail());
+
+        if (calResponse == null || calResponse.getData() == null) {
+            return Collections.emptyList();
+        }
+
+        // 3. 将Cal.com返回的数据转换为VO
+        return calResponse.getData().stream()
+                .map(this::convertCalBookingToVO)
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -142,33 +138,16 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional
     public void handleWebhook(CalWebhookPayload payload) {
-        String triggerEvent = payload.getTriggerEvent();
         CalWebhookPayload.BookingPayload bookingData = payload.getPayload();
+        log.info("handleWebhook: {}", bookingData);
 
         if (bookingData == null) {
             throw new RuntimeException("Webhook payload为空");
         }
 
-        switch (triggerEvent) {
-            case "BOOKING_CREATED":
-                handleBookingCreated(bookingData);
-                break;
-            case "BOOKING_CANCELLED":
-                handleBookingCancelled(bookingData);
-                break;
-            case "BOOKING_RESCHEDULED":
-                handleBookingRescheduled(bookingData);
-                break;
-            default:
-                // 忽略其他事件
-                break;
-        }
+        handleBookingCreated(bookingData);
     }
 
-    @Override
-    public Booking getById(Long bookingId) {
-        return bookingMapper.selectById(bookingId);
-    }
 
     private void handleBookingCreated(CalWebhookPayload.BookingPayload bookingData) {
         // 从webhook数据创建预约记录
@@ -189,64 +168,54 @@ public class BookingServiceImpl implements BookingService {
             }
         }
 
-        // 获取组织者信息（教练）
+        // 获取组织者信息（导师）
         if (bookingData.getOrganizer() != null) {
             booking.setCoachName(bookingData.getOrganizer().getName());
             booking.setCoachEmail(bookingData.getOrganizer().getEmail());
-            booking.setCalCoachId(bookingData.getOrganizer().getUsername());
+        }
+
+        // 提取视频会议URL
+        String meetingUrl = bookingData.getLocation();
+        if (bookingData.getMetadata() != null && bookingData.getMetadata().containsKey("videoCallUrl")) {
+            meetingUrl = (String) bookingData.getMetadata().get("videoCallUrl");
         }
 
         // 设置预约信息
         booking.setExternalBookingId(bookingData.getUid());
         booking.setStartTime(parseDateTime(bookingData.getStartTime()));
         booking.setEndTime(parseDateTime(bookingData.getEndTime()));
-        booking.setMeetingUrl(bookingData.getLocation());
+        booking.setMeetingUrl(meetingUrl);
         booking.setStatus(BookingStatus.BOOKING_CREATED);
         booking.setCreatedAt(LocalDateTime.now());
         booking.setUpdatedAt(LocalDateTime.now());
 
         bookingMapper.insert(booking);
+
+        // 记录日志
+        log.info("用户 {} 预约了导师 {}，支付成功 - 预约时间: {} - {}, 会议链接: {}", 
+            booking.getUserName(), booking.getCoachName(),
+            booking.getStartTime(), booking.getEndTime(), meetingUrl);
     }
 
-    private void handleBookingCancelled(CalWebhookPayload.BookingPayload bookingData) {
-        // 根据externalBookingId查找预约
-        LambdaQueryWrapper<Booking> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Booking::getExternalBookingId, bookingData.getUid());
-        Booking booking = bookingMapper.selectOne(wrapper);
-
-        if (booking != null) {
-            booking.setStatus(BookingStatus.BOOKING_CANCELLED);
-            booking.setUpdatedAt(LocalDateTime.now());
-            bookingMapper.updateById(booking);
-        }
-    }
-
-    private void handleBookingRescheduled(CalWebhookPayload.BookingPayload bookingData) {
-        // 重新安排预约时间
-        LambdaQueryWrapper<Booking> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Booking::getExternalBookingId, bookingData.getUid());
-        Booking booking = bookingMapper.selectOne(wrapper);
-
-        if (booking != null) {
-            booking.setStartTime(parseDateTime(bookingData.getStartTime()));
-            booking.setEndTime(parseDateTime(bookingData.getEndTime()));
-            booking.setMeetingUrl(bookingData.getLocation());
-            booking.setUpdatedAt(LocalDateTime.now());
-            bookingMapper.updateById(booking);
-        }
-    }
-
-    private BookingDetailVO convertToVO(Booking booking) {
+    /**
+     * 将Cal.com的预约数据转换为VO
+     */
+    private BookingDetailVO convertCalBookingToVO(CalBookingResponse.BookingData calBooking) {
         BookingDetailVO vo = new BookingDetailVO();
-        vo.setId(booking.getId());
-        vo.setCoachName(booking.getCoachName());
-        vo.setCoachEmail(booking.getCoachEmail());
-        vo.setStartTime(booking.getStartTime());
-        vo.setEndTime(booking.getEndTime());
-        vo.setMeetingUrl(booking.getMeetingUrl());
-        vo.setStatus(booking.getStatus());
-        vo.setExternalBookingId(booking.getExternalBookingId());
-        vo.setCreatedAt(booking.getCreatedAt());
+        
+        // 1. 预约状态
+        vo.setStatus(calBooking.getStatus());
+        
+        // 2. Coach名称
+        if (calBooking.getHosts() != null && !calBooking.getHosts().isEmpty()) {
+            CalBookingResponse.Host host = calBooking.getHosts().get(0);
+            vo.setCoachName(host.getName());
+        }
+        
+        // 3. 预约时间段
+        vo.setStartTime(calBooking.getStartTime());
+        vo.setEndTime(calBooking.getEndTime());
+        
         return vo;
     }
 
@@ -257,6 +226,18 @@ public class BookingServiceImpl implements BookingService {
         } catch (Exception e) {
             // 如果解析失败，尝试其他格式或返回当前时间
             return LocalDateTime.now();
+        }
+    }
+
+    /**
+     * 格式化时间槽（从ISO 8601格式提取时间部分）
+     */
+    private String formatTimeSlot(String isoDateTime) {
+        try {
+            LocalDateTime dateTime = LocalDateTime.parse(isoDateTime, DateTimeFormatter.ISO_DATE_TIME);
+            return dateTime.format(DateTimeFormatter.ofPattern("HH:mm"));
+        } catch (Exception e) {
+            return isoDateTime; // 如果解析失败，返回原始值
         }
     }
 }

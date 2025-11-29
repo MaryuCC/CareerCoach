@@ -1,6 +1,6 @@
 package com.coach.careercoach.external;
 
-import com.coach.careercoach.dto.calcom.EventTypeResponse;
+import com.coach.careercoach.dto.calcom.CalBookingResponse;
 import com.coach.careercoach.dto.calcom.SlotResponse;
 
 import java.time.LocalDate;
@@ -11,19 +11,14 @@ import java.time.LocalDate;
 public interface CalComClient {
 
     /**
-     * 获取所有Event Types
-     * @return Event Types响应
-     */
-    EventTypeResponse getEventTypes();
-
-    /**
      * 获取可用时间槽
+     * @param userId 用户ID
      * @param eventTypeId Event Type ID
      * @param startDate 开始日期
      * @param endDate 结束日期
      * @return 可用时间槽响应
      */
-    SlotResponse getAvailableSlots(Long eventTypeId, LocalDate startDate, LocalDate endDate);
+    SlotResponse getAvailableSlots(Long userId, Long eventTypeId, LocalDate startDate, LocalDate endDate);
 
     /**
      * 获取预约链接
@@ -38,5 +33,13 @@ public interface CalComClient {
      * @return 取消链接URL
      */
     String getCancelUrl(String externalBookingId);
+
+    /**
+     * 获取用户的预约列表
+     * @param userId 用户ID
+     * @param attendeeEmail 参会者邮箱
+     * @return Cal.com预约列表响应
+     */
+    CalBookingResponse getUserBookings(Long userId, String attendeeEmail);
 }
 

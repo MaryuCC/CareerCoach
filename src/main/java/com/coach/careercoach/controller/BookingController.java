@@ -23,11 +23,12 @@ public class BookingController {
     }
 
     /**
-     * 1: 获取可用时间槽
+     * 获取可用时间槽
      * GET /api/available-slots?startDate=2024-12-01&endDate=2024-12-31
      */
     @GetMapping("/available-slots")
     public ApiResponse<AvailableSlotsResponse> getAvailableSlots(
+            @RequestParam Long userId,
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate) {
         
@@ -35,12 +36,12 @@ public class BookingController {
         LocalDate start = startDate != null ? LocalDate.parse(startDate) : LocalDate.now();
         LocalDate end = endDate != null ? LocalDate.parse(endDate) : LocalDate.now().plusDays(30);
         
-        AvailableSlotsResponse response = bookingService.getAvailableSlots(start, end);
+        AvailableSlotsResponse response = bookingService.getAvailableSlots(userId, start, end);
         return ApiResponse.ok(response);
     }
 
     /**
-     * 2: 获取预约链接（用户选择时间槽后）
+     * 获取预约链接（用户选择时间槽后）
      * POST /api/booking-url?userId={userId}
      */
     @PostMapping("/booking-url")

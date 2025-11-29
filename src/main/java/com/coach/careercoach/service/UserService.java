@@ -15,17 +15,11 @@ public interface UserService {
     User getById(Long userId);
 
     /**
-     * 根据邮箱查询用户
-     * @param email 邮箱
-     * @return 用户实体
+     * 更新用户的API Key
+     * @param userId 用户ID
+     * @param apiKeyHash API Key的哈希值
+     * @return 是否更新成功
      */
-    User getByEmail(String email);
-
-    /**
-     * 创建用户
-     * @param user 用户实体
-     * @return 创建的用户
-     */
-    User create(User user);
+    boolean updateApiKeyHash(Long userId, String apiKeyHash);
 }
 

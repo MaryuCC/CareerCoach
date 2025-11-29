@@ -12,11 +12,12 @@ public interface BookingService {
 
     /**
      * 获取可用时间槽（预约前的第一步）
+     * @param userId 用户ID（用于获取API Key）
      * @param startDate 开始日期
      * @param endDate 结束日期
      * @return 可用时间槽
      */
-    AvailableSlotsResponse getAvailableSlots(LocalDate startDate, LocalDate endDate);
+    AvailableSlotsResponse getAvailableSlots(Long userId, LocalDate startDate, LocalDate endDate);
 
     /**
      * 获取预约链接（预约的最后一步）
@@ -45,10 +46,4 @@ public interface BookingService {
      */
     void handleWebhook(CalWebhookPayload payload);
 
-    /**
-     * 根据ID查询预约
-     * @param bookingId 预约ID
-     * @return 预约实体
-     */
-    Booking getById(Long bookingId);
 }

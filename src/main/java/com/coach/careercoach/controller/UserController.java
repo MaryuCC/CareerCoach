@@ -5,29 +5,27 @@ import com.coach.careercoach.dto.auth.LoginRequest;
 import com.coach.careercoach.dto.auth.LoginResponse;
 import com.coach.careercoach.dto.auth.RegisterRequest;
 import com.coach.careercoach.dto.auth.RegisterResponse;
-import com.coach.careercoach.dto.coach.CoachQueryRequest;
-import com.coach.careercoach.model.entity.CoachProfile;
 import com.coach.careercoach.service.AuthService;
-import com.coach.careercoach.service.CoachService;
+import com.coach.careercoach.service.UserService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import java.util.Map;
 
 /**
- * 用户相关控制器
- * 包括认证、教练查询等功能
+ * 用户控制器
+ * 处理用户认证和管理功能
  */
 @RestController
 @RequestMapping("/api/user")
 public class UserController {
 
     private final AuthService authService;
-    private final CoachService coachService;
+    private final UserService userService;
 
-    public UserController(AuthService authService, CoachService coachService) {
+    public UserController(AuthService authService, UserService userService) {
         this.authService = authService;
-        this.coachService = coachService;
+        this.userService = userService;
     }
 
     /**
@@ -49,20 +47,16 @@ public class UserController {
     }
 
     /**
-     * 查询教练列表
+     * 更新用户的API Key
      */
-    @GetMapping("/coaches")
-    public ApiResponse<List<CoachProfile>> listCoaches(@ModelAttribute CoachQueryRequest query,
-                                                       @RequestParam(defaultValue = "1") long page,
-                                                       @RequestParam(defaultValue = "10") long size) {
-        return ApiResponse.ok(coachService.list(query, page, size));
-    }
-
-    /**
-     * 查询教练详情
-     */
-    @GetMapping("/coaches/{calCoachId}")
-    public ApiResponse<CoachProfile> coachDetail(@PathVariable String calCoachId) {
-        return ApiResponse.ok(coachService.findByCalCoachId(calCoachId));
+    @PostMapping("/{userId}/apikey")
+    public ApiResponse<String> updateApiKey(@PathVariable Long userId,
+                                           @RequestBody Map<String, String> request) {
+        String apiKey = request.get("apiKey");
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            return ApiResponse.fail("API Key不能为空");
+        }
+        boolean success = userService.updateApiKeyHash(userId, apiKey);
+        return success ? ApiResponse.ok("API Key更新成功") : ApiResponse.fail("API Key更新失败");
     }
 }

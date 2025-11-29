@@ -1,9 +1,6 @@
 package com.coach.careercoach.dto.booking;
 
-import com.coach.careercoach.enums.BookingStatus;
 import lombok.Data;
-
-import java.time.LocalDateTime;
 
 /**
  * 预约详情视图对象
@@ -11,14 +8,16 @@ import java.time.LocalDateTime;
 @Data
 public class BookingDetailVO {
 
-    private Long id;
+    /** 预约状态 */
+    private String status;
+    
+    /** Coach名称 */
     private String coachName;
-    private String coachEmail;
-    private LocalDateTime startTime;
-    private LocalDateTime endTime;
-    private String meetingUrl;
-    private BookingStatus status;
-    private String externalBookingId;
-    private LocalDateTime createdAt;
+    
+    /** 预约开始时间 */
+    private String startTime;
+    
+    /** 预约结束时间 */
+    private String endTime;
 }
 
