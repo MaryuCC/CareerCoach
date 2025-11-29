@@ -3,7 +3,6 @@ package com.coach.careercoach.service;
 import com.coach.careercoach.dto.booking.AvailableSlotsResponse;
 import com.coach.careercoach.dto.booking.BookingDetailVO;
 import com.coach.careercoach.dto.webhook.CalWebhookPayload;
-import com.coach.careercoach.model.entity.Booking;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -45,5 +44,11 @@ public interface BookingService {
      * @param payload Webhook数据
      */
     void handleWebhook(CalWebhookPayload payload);
+
+    /**
+     * 处理预约取消Webhook事件
+     * @param payload Webhook数据
+     */
+    void handleCancelWebhook(CalWebhookPayload payload);
 
 }

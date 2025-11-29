@@ -83,4 +83,18 @@ public class BookingController {
             return ApiResponse.fail("Webhook处理失败: " + e.getMessage());
         }
     }
+
+    /**
+     * 接收Cal.com 取消预约Webhook
+     * POST /api/webhook/cancel
+     */
+    @PostMapping("/webhook/cancel")
+    public ApiResponse<String> handleCancelWebhook(@RequestBody CalWebhookPayload payload) {
+        try {
+            bookingService.handleCancelWebhook(payload);
+            return ApiResponse.ok("预约取消处理成功");
+        } catch (Exception e) {
+            return ApiResponse.fail("预约取消处理失败: " + e.getMessage());
+        }
+    }
 }

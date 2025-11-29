@@ -1,6 +1,7 @@
 package com.coach.careercoach.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.coach.careercoach.dto.booking.AvailableSlotsResponse;
 import com.coach.careercoach.dto.booking.BookingDetailVO;
 import com.coach.careercoach.dto.calcom.CalBookingResponse;
@@ -148,6 +149,18 @@ public class BookingServiceImpl implements BookingService {
         handleBookingCreated(bookingData);
     }
 
+    @Override
+    @Transactional
+    public void handleCancelWebhook(CalWebhookPayload payload) {
+        CalWebhookPayload.BookingPayload bookingData = payload.getPayload();
+        log.info("handleCancelWebhook: {}", bookingData);
+
+        if (bookingData == null) {
+            throw new RuntimeException("Webhook payload为空");
+        }
+
+        handleBookingCancelled(bookingData);
+    }
 
     private void handleBookingCreated(CalWebhookPayload.BookingPayload bookingData) {
         // 从webhook数据创建预约记录
@@ -192,9 +205,31 @@ public class BookingServiceImpl implements BookingService {
         bookingMapper.insert(booking);
 
         // 记录日志
-        log.info("用户 {} 预约了导师 {}，支付成功 - 预约时间: {} - {}, 会议链接: {}", 
+        log.info("用户 {} 预约了导师 {}，支付成功 - 预约时间: {} - {}, 会议id {} ，会议链接: {}", 
             booking.getUserName(), booking.getCoachName(),
-            booking.getStartTime(), booking.getEndTime(), meetingUrl);
+            booking.getStartTime(), booking.getEndTime(), booking.getId(), meetingUrl);
+    }
+
+    private void handleBookingCancelled(CalWebhookPayload.BookingPayload bookingData) {
+        // 根据externalBookingId查找预约
+        LambdaQueryWrapper<Booking> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(Booking::getExternalBookingId, bookingData.getUid());
+        Booking booking = bookingMapper.selectOne(queryWrapper);
+
+        if (booking != null) {
+            // 使用 UpdateWrapper 来更新，避免乐观锁问题
+            LambdaUpdateWrapper<Booking> updateWrapper = new LambdaUpdateWrapper<>();
+            updateWrapper.eq(Booking::getExternalBookingId, bookingData.getUid())
+                .set(Booking::getStatus, BookingStatus.BOOKING_CANCELLED)
+                .set(Booking::getUpdatedAt, LocalDateTime.now());
+            
+            bookingMapper.update(null, updateWrapper);
+            
+            log.info("用户 {} 与导师 {} 的预约已取消 - 预约ID: {}", 
+                booking.getUserName(), booking.getCoachName(), booking.getId());
+        } else {
+            log.warn("未找到对应的预约记录，externalBookingId: {}", bookingData.getUid());
+        }
     }
 
     /**
